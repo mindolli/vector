@@ -1,0 +1,3 @@
+# 이 파일을 .dev.vars 로 복사해서 값을 채운다. (.dev.vars 는 git 에 올라가지 않는다)
+# 토큰 생성 예: openssl rand -hex 32
+API_TOKEN=change-me-to-a-long-random-string
