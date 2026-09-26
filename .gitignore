@@ -20,6 +20,8 @@ npm-debug.log*
 .claude/settings.local.json
 .vscode/
 .idea/
+docs/explantion/
+docs/reports/
 
 # macOS
 .DS_Store
