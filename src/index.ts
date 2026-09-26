@@ -1,3 +1,4 @@
+import { processUnfinished } from "./pipeline.ts";
 import { handleApi } from "./routes.ts";
 
 export default {
@@ -16,7 +17,8 @@ export default {
     return new Response("Not found", { status: 404 });
   },
 
+  // 매시간: 실패했거나 밀린 임베딩·인덱싱을 처리한다 (Vectorize 재구축도 이 경로).
   async scheduled(controller, env, ctx): Promise<void> {
-    // 밀린 임베딩·인덱싱 처리는 3페이즈(pipeline.ts)에서 추가한다.
+    await processUnfinished(env);
   },
 } satisfies ExportedHandler<Env>;

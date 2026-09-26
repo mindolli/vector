@@ -322,7 +322,7 @@ LIMIT ?4 OFFSET ?5;</code></pre>
 
 <div class="callout warn">
   <strong>최종적 일관성(eventual consistency)</strong>
-  Vectorize는 삽입 요청을 받은 뒤 몇 초가 지나야 검색에 반영됩니다. 그래서 방금 저장한 북마크로 곧바로 유사 조회를 하면 결과가 비어 있을 수 있습니다. 또한 삭제가 실패해서 Vectorize에 벡터가 남는 경우, 유사 조회 결과에 D1에 없는 ID가 섞일 수 있습니다. 그래서 D1을 조회할 때 존재하지 않는 ID는 조용히 버리도록 구현합니다.
+  Vectorize(V2)는 삽입 요청을 비동기로 처리하므로, 요청이 받아들여진 뒤 한참 지나야 검색에 반영됩니다. 2026-09-26에 개발용 인덱스에서 두 번 측정했을 때 두 번 모두 <strong>약 100초</strong>가 걸렸습니다. 삭제도 똑같이 비동기이므로, 삭제한 북마크의 벡터도 한동안 조회 결과에 섞여 나옵니다. 따라서 <code>indexed</code>는 "Vectorize가 요청을 받아들였다"는 뜻이지 "곧바로 조회된다"는 뜻이 아니며, 방금 저장한 북마크로 유사 조회를 하면 1~2분 동안 결과가 비어 있을 수 있습니다. 없는 ID로 <code>queryById</code>를 호출하면 오류 없이 빈 결과가 돌아옵니다. 또한 삭제가 실패해서 Vectorize에 벡터가 남는 경우, 유사 조회 결과에 D1에 없는 ID가 섞일 수 있습니다. 그래서 D1을 조회할 때 존재하지 않는 ID는 조용히 버리도록 구현합니다.
 </div>
 
 <h3>교체 가능한 인터페이스</h3>
@@ -391,7 +391,7 @@ LIMIT ?4 OFFSET ?5;</code></pre>
     { "id": 19, "score": 0.79, "title": "...", "url": "...", "created_at": "2026-09-10T09:26:40+09:00" }
   ]
 }</code></pre>
-<p>기준 북마크가 아직 <code>indexed</code> 상태가 아니면 <code>items</code>를 빈 배열로 돌려주고 <code>status</code>에 현재 상태를 담습니다. 그러면 UI가 "임베딩 대기 중"이라고 안내할 수 있습니다. <code>created_at</code>은 D1에 Unix ms로 저장되어 있지만, 응답에서는 KST 문자열로 변환해서 내보냅니다.</p>
+<p>기준 북마크가 아직 <code>indexed</code> 상태가 아니면 <code>items</code>를 빈 배열로 돌려주고 <code>status</code>에 현재 상태를 담습니다. 그러면 UI가 "임베딩 대기 중"이라고 안내할 수 있습니다. <code>k</code>는 1~20이고 기본값은 10입니다. <code>created_at</code>은 D1에 Unix ms로 저장되어 있지만, 응답에서는 KST 문자열로 변환해서 내보냅니다.</p>
 
 <!-- ─────────────────────────────── -->
 <h2 id="bookmarklet">6. 북마클릿과 팝업의 통신</h2>
@@ -521,16 +521,17 @@ LIMIT ?4 OFFSET ?5;</code></pre>
   </dl>
 </div>
 
-<div class="phase next">
-  <div class="phase-head"><span class="num">3</span><h3>벡터 파이프라인</h3><span class="b st-next">다음</span></div>
+<div class="phase done">
+  <div class="phase-head"><span class="num">3</span><h3>벡터 파이프라인</h3><span class="b st-done">완료</span></div>
   <p class="goal">임베딩 생성, Vectorize 연동, 상태 전이, Cron 재시도, 유사 조회를 구현합니다. 이 페이즈부터 Cloudflare 계정이 필요합니다.</p>
   <dl>
     <dt>사전 준비</dt>
     <dd>
       <ul>
         <li><code>wrangler login</code>으로 Cloudflare 계정에 로그인합니다.</li>
-        <li>개발용 인덱스를 따로 만듭니다(예: <code>bookmarks-dev</code>, 1024차원, cosine). 로컬 D1의 ID와 운영 인덱스의 ID가 섞이지 않게 하기 위해서입니다.</li>
-        <li>wrangler.jsonc에서 AI와 Vectorize 바인딩을 원격 연결로 설정하고, 타입을 다시 생성합니다.</li>
+        <li>개발용 인덱스 <code>bookmarks-dev</code>(1024차원, cosine)를 만듭니다. 로컬 D1의 ID와 운영 인덱스의 ID가 섞이지 않게 하기 위해서입니다.</li>
+        <li><strong>개발·운영 분리:</strong> wrangler.jsonc의 최상위 설정은 개발용(로컬 D1 + 원격 <code>bookmarks-dev</code> + 원격 AI)이고, 운영 자원은 5페이즈에서 <code>env.production</code>에만 선언합니다. <code>npm run deploy</code>는 <code>wrangler deploy --env production</code>입니다. 옵션을 빠뜨려도 개발 자원만 영향을 받습니다. 바인딩은 환경에 상속되지 않으므로, <code>env.production</code>에는 D1·Vectorize·AI·Cron을 모두 다시 선언해야 합니다.</li>
+        <li>wrangler.jsonc에서 AI와 Vectorize 바인딩에 <code>"remote": true</code>를 설정하고, 타입을 다시 생성합니다.</li>
       </ul>
     </dd>
     <dt>파일</dt>
@@ -543,13 +544,18 @@ LIMIT ?4 OFFSET ?5;</code></pre>
         <li>임베딩 실패를 일부러 일으키면 <code>embed_attempts</code>가 늘어나고, 5회에 도달하면 Cron이 더 이상 시도하지 않습니다.</li>
         <li>Cron을 수동으로 실행했을 때 밀린 항목이 처리됩니다.</li>
         <li>상태를 <code>embedded</code>로 되돌리는 SQL 한 줄로 Vectorize 재구축이 되고, 이때 Workers AI를 호출하지 않습니다.</li>
+        <li>Cron 한 번에 <code>embedded</code>는 최대 100개를 upsert 한 번으로 묶어 처리하고, <code>pending</code>은 AI를 호출하므로 최대 10개까지만 처리합니다(무료 플랜의 하위 요청 한도 대비). 따라서 재구축은 시간당 100개씩 진행됩니다.</li>
       </ul>
     </dd>
+    <dt>검증 방법</dt>
+    <dd>단위 테스트(<code>npm test</code>), 원격 자원 확인 스크립트(<code>node scripts/probe-vectors.ts</code>), 파이프라인 흐름 검증(<code>npm run smoke:vectors</code>, 4~5분). smoke:vectors는 끝날 때 만든 북마크와 벡터를 모두 지웁니다.</dd>
+    <dt>보고서</dt>
+    <dd><code>docs/reports/03-vectors.html</code></dd>
   </dl>
 </div>
 
-<div class="phase">
-  <div class="phase-head"><span class="num">4</span><h3>화면 (팝업·북마클릿·검색 UI)</h3><span class="b">예정</span></div>
+<div class="phase next">
+  <div class="phase-head"><span class="num">4</span><h3>화면 (팝업·북마클릿·검색 UI)</h3><span class="b st-next">다음</span></div>
   <p class="goal">브라우저에서 쓰는 세 부분을 만듭니다. 모두 프레임워크 없이 순수 HTML과 JS로 작성합니다.</p>
   <dl>
     <dt>파일</dt>
@@ -584,7 +590,7 @@ LIMIT ?4 OFFSET ?5;</code></pre>
         <li><code>npm run db:migrate:remote</code>로 원격 D1에 스키마를 적용합니다.</li>
         <li>운영용 Vectorize 인덱스 <code>bookmarks</code>를 만듭니다(1024차원, cosine).</li>
         <li><code>wrangler secret put API_TOKEN</code>으로 운영 토큰을 등록합니다.</li>
-        <li>wrangler.jsonc에 Custom Domain을 설정하고 <code>npm run typecheck</code> 후 <code>npm run deploy</code>를 실행합니다.</li>
+        <li>wrangler.jsonc에 <code>env.production</code>을 추가합니다. 실제 D1 ID, 운영 인덱스 <code>bookmarks</code>, AI, Cron, Custom Domain을 모두 선언한 뒤 <code>npm run typecheck</code>와 <code>npm run deploy</code>를 실행합니다.</li>
         <li>북마클릿의 도메인을 확정하고, 실제 사용 흐름과 Cron 실행 로그를 확인합니다.</li>
       </ol>
     </dd>

@@ -13,3 +13,5 @@
 - Do not try to complete a stage in one turn. Try to complete it in a few turns and check steps with me.
 
 - If you change the code, let me know what you changed in the script in advance.
+
+- ./docs/reports/의 파일을 수정할 때는 허가를 받지 않아도 됩니다. 그리고 모바일 환경에서 가독성은 평가하지 않습니다.

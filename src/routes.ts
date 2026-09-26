@@ -7,11 +7,14 @@ import {
   deleteBookmark,
   findByUrl,
   getBookmark,
+  getByIds,
   insertBookmark,
   searchBookmarks,
   type BookmarkInput,
   type BookmarkListItem,
 } from "./db.ts";
+import { processBookmark } from "./pipeline.ts";
+import { createVectorizeStore } from "./vector-store.ts";
 
 /** 필드별 최대 길이 (코드 포인트 기준). url 은 자르지 않고 넘으면 거부한다. */
 export const LIMITS = { url: 2048, title: 500, description: 1000, content: 2000, memo: 2000 } as const;
@@ -19,6 +22,8 @@ const MAX_BODY_CHARS = 100_000;
 const MAX_QUERY_CHARS = 200;
 const DEFAULT_PAGE = 20;
 const MAX_PAGE = 100;
+const DEFAULT_SIMILAR = 10;
+const MAX_SIMILAR = 20;
 
 export async function handleApi(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
   if (!(await isAuthorized(request, env.API_TOKEN))) return error(401, "unauthorized");
@@ -29,7 +34,7 @@ export async function handleApi(request: Request, env: Env, ctx: ExecutionContex
 
   if (path === "/api/bookmarks") {
     if (method === "GET") return listBookmarks(env, url.searchParams);
-    if (method === "POST") return createBookmark(env, request);
+    if (method === "POST") return createBookmark(env, ctx, request);
     return error(405, "method not allowed");
   }
   if (path === "/api/bookmarks/lookup") {
@@ -43,12 +48,17 @@ export async function handleApi(request: Request, env: Env, ctx: ExecutionContex
     if (method === "DELETE") return removeBookmark(env, id);
     return error(405, "method not allowed");
   }
+  const similarMatch = /^\/api\/bookmarks\/([1-9]\d{0,15})\/similar$/.exec(path);
+  if (similarMatch) {
+    if (method === "GET") return similarBookmarks(env, Number(similarMatch[1]), url.searchParams);
+    return error(405, "method not allowed");
+  }
   return error(404, "not found");
 }
 
 // ── 핸들러 ──────────────────────────────────────────
 
-async function createBookmark(env: Env, request: Request): Promise<Response> {
+async function createBookmark(env: Env, ctx: ExecutionContext, request: Request): Promise<Response> {
   const text = await request.text();
   if (text.length > MAX_BODY_CHARS) return error(413, "request body too large");
 
@@ -64,8 +74,10 @@ async function createBookmark(env: Env, request: Request): Promise<Response> {
 
   const result = await insertBookmark(env.DB, input.value, Date.now());
   if (!result.ok) return Response.json({ error: "duplicate", id: result.duplicateOf }, { status: 409 });
-  // 3페이즈: 여기서 ctx.waitUntil 로 임베딩 파이프라인을 시작한다.
-  return Response.json({ id: result.id, embed_status: "pending" }, { status: 201 });
+  // 응답을 먼저 보내고, 임베딩·인덱싱은 응답 뒤에 이어서 진행한다. 실패하면 Cron 이 다시 시도한다.
+  const id = result.id;
+  ctx.waitUntil(processBookmark(env, id).catch((err) => console.error("processBookmark after insert failed", { id, err })));
+  return Response.json({ id, embed_status: "pending" }, { status: 201 });
 }
 
 async function lookupBookmark(env: Env, params: URLSearchParams): Promise<Response> {
@@ -120,8 +132,33 @@ async function showBookmark(env: Env, id: number): Promise<Response> {
 
 async function removeBookmark(env: Env, id: number): Promise<Response> {
   const deleted = await deleteBookmark(env.DB, id);
-  // 3페이즈: D1 삭제 후 Vectorize 에서도 지운다.
-  return deleted ? new Response(null, { status: 204 }) : error(404, "not found");
+  if (!deleted) return error(404, "not found");
+  // D1 이 원본이므로 D1 삭제가 성공하면 204. Vectorize 에 벡터가 남더라도 유사 조회에서
+  // D1 에 없는 id 로 걸러지고, AUTOINCREMENT 라서 다른 북마크에 잘못 붙지 않는다.
+  try {
+    await createVectorizeStore(env.VECTORIZE).delete([id]);
+  } catch (err) {
+    console.error("vector delete failed (orphan vector left in index)", { id, err });
+  }
+  return new Response(null, { status: 204 });
+}
+
+async function similarBookmarks(env: Env, id: number, params: URLSearchParams): Promise<Response> {
+  const k = parseIntParam(params.get("k"), DEFAULT_SIMILAR, 1, MAX_SIMILAR);
+  if (k === null) return error(400, `k must be an integer between 1 and ${MAX_SIMILAR}`);
+
+  const base = await getBookmark(env.DB, id);
+  if (!base) return error(404, "not found");
+  // 아직 Vectorize 에 넣지 않았으면 빈 결과. indexed 직후에도 반영까지 1~2분 걸릴 수 있다.
+  if (base.embed_status !== "indexed") return Response.json({ status: base.embed_status, items: [] });
+
+  const matches = await createVectorizeStore(env.VECTORIZE).similar(id, k);
+  const rows = new Map((await getByIds(env.DB, matches.map((m) => m.id))).map((r) => [r.id, r]));
+  const items = matches.flatMap((m) => {
+    const row = rows.get(m.id);
+    return row ? [{ ...toSummary(row), score: m.score }] : []; // D1 에 없는 id(남은 벡터)는 버린다
+  });
+  return Response.json({ status: base.embed_status, items });
 }
 
 // ── 검증·변환 (순수 함수, 단위 테스트 대상) ──────────────

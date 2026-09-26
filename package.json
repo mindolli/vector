@@ -5,13 +5,14 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:local": "wrangler dev --local",
-    "deploy": "wrangler deploy",
+    "deploy": "wrangler deploy --env production",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply vector-bookmarks --local",
     "db:migrate:remote": "wrangler d1 migrations apply vector-bookmarks --remote",
     "test": "node --test test/*.test.ts",
-    "smoke": "bash scripts/smoke.sh"
+    "smoke": "bash scripts/smoke.sh",
+    "smoke:vectors": "bash scripts/smoke-vectors.sh"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
