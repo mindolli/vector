@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>스키마와 API 설계</title>
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --surface: #ffffff;
+    --text: #1f2328;
+    --muted: #5d6570;
+    --border: #e3e0d8;
+    --accent: #2f6fdb;
+    --accent-soft: #e8f0fd;
+    --ok: #1f8a4c;
+    --ok-soft: #e4f4ea;
+    --warn: #b76a00;
+    --warn-soft: #fcf1df;
+    --bad: #c23b3b;
+    --code-bg: #f4f2ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181c;
+      --surface: #1e2126;
+      --text: #e6e6e3;
+      --muted: #a0a6ae;
+      --border: #33373e;
+      --accent: #7aa7ff;
+      --accent-soft: #1f2b44;
+      --ok: #5cc98a;
+      --ok-soft: #183526;
+      --warn: #f0b04a;
+      --warn-soft: #3a2c14;
+      --bad: #ff7b7b;
+      --code-bg: #25282e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181c;
+    --surface: #1e2126;
+    --text: #e6e6e3;
+    --muted: #a0a6ae;
+    --border: #33373e;
+    --accent: #7aa7ff;
+    --accent-soft: #1f2b44;
+    --ok: #5cc98a;
+    --ok-soft: #183526;
+    --warn: #f0b04a;
+    --warn-soft: #3a2c14;
+    --bad: #ff7b7b;
+    --code-bg: #25282e;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.75 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Noto Sans KR", sans-serif;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+  main { max-width: 820px; margin: 0 auto; padding: 48px 16px 96px; }
+  h1 { font-size: 2rem; line-height: 1.3; margin: 0 0 8px; }
+  h2 { font-size: 1.4rem; margin: 56px 0 12px; padding-top: 8px; border-top: 1px solid var(--border); }
+  h3 { font-size: 1.1rem; margin: 32px 0 8px; }
+  p { margin: 12px 0; }
+  .lede { color: var(--muted); font-size: 1.05rem; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; overflow-x: auto; line-height: 1.55; font-size: 0.86rem; }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .table-wrap { overflow-x: auto; margin: 16px 0; border: 1px solid var(--border); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.92rem; background: var(--surface); }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { background: var(--code-bg); font-weight: 600; white-space: nowrap; }
+  tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+  .callout { border-left: 4px solid var(--accent); background: var(--accent-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 20px 0; }
+  .callout.warn { border-color: var(--warn); background: var(--warn-soft); }
+  .callout.ok { border-color: var(--ok); background: var(--ok-soft); }
+  .callout strong:first-child { display: block; margin-bottom: 4px; }
+  .toc { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; margin: 24px 0; }
+  .toc ol { margin: 4px 0; padding-left: 20px; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .method { display: inline-block; font-family: ui-monospace, monospace; font-size: 0.78rem; font-weight: 700; padding: 1px 6px; border-radius: 4px; min-width: 56px; text-align: center; }
+  .GET { background: var(--ok-soft); color: var(--ok); }
+  .POST { background: var(--accent-soft); color: var(--accent); }
+  .DELETE { background: var(--warn-soft); color: var(--warn); }
+  .CRON { background: var(--code-bg); color: var(--muted); }
+  figure { margin: 24px 0; }
+  figure svg { width: 100%; height: auto; display: block; }
+  figcaption { color: var(--muted); font-size: 0.88rem; margin-top: 6px; text-align: center; }
+  .svg-box { fill: var(--surface); stroke: var(--border); stroke-width: 1.5; }
+  .svg-box.ok { stroke: var(--ok); }
+  .svg-box.acc { stroke: var(--accent); }
+  .svg-box.warn { stroke: var(--warn); }
+  .svg-text { fill: var(--text); font: 600 14px -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  .svg-sub { fill: var(--muted); font: 12px -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  .svg-line { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+  .svg-line.bad { stroke: var(--bad); stroke-dasharray: 5 4; }
+  .svg-label { fill: var(--muted); font: 12px -apple-system, "Apple SD Gothic Neo", sans-serif; }
+  .svg-label.bad { fill: var(--bad); }
+  ol.q li { margin-bottom: 10px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>스키마와 API 설계 (초안)</h1>
+<p class="lede">계획.md에서 확정한 결정 사항을 D1 테이블, 임베딩 상태 전이, API 엔드포인트, 파일 구조로 구체화한 문서입니다. 아직 코드는 작성하지 않았고, 이 초안을 확인받은 뒤에 구현을 시작합니다.</p>
+
+<nav class="toc">
+  <ol>
+    <li><a href="#big-picture">전체 그림</a></li>
+    <li><a href="#schema">D1 스키마</a></li>
+    <li><a href="#states">임베딩 상태 전이</a></li>
+    <li><a href="#vectorize">Vectorize 인덱스</a></li>
+    <li><a href="#api">API 엔드포인트</a></li>
+    <li><a href="#bookmarklet">북마클릿과 팝업의 통신</a></li>
+    <li><a href="#layout">파일 구조</a></li>
+    <li><a href="#budget">무료 티어 예산</a></li>
+    <li><a href="#open">확인이 필요한 질문</a></li>
+  </ol>
+</nav>
+
+<!-- ─────────────────────────────── -->
+<h2 id="big-picture">1. 전체 그림</h2>
+<p>이 서비스는 Worker 하나로 구성됩니다. Worker는 정적 페이지(검색 UI와 저장 팝업)를 제공하고, <code>/api/*</code> 경로로 들어오는 요청을 처리하며, 한 시간마다 Cron으로 깨어나서 밀린 임베딩 작업을 처리합니다.</p>
+
+<figure>
+<svg viewBox="0 0 760 300" role="img" aria-label="브라우저, Worker, D1, Workers AI, Vectorize 사이의 데이터 흐름">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+  </defs>
+  <!-- browser -->
+  <rect class="svg-box" x="10" y="30" width="170" height="110" rx="10"/>
+  <text class="svg-text" x="95" y="58" text-anchor="middle">브라우저</text>
+  <text class="svg-sub" x="95" y="82" text-anchor="middle">북마클릿</text>
+  <text class="svg-sub" x="95" y="100" text-anchor="middle">저장 팝업 (save.html)</text>
+  <text class="svg-sub" x="95" y="118" text-anchor="middle">검색 UI (index.html)</text>
+  <!-- worker -->
+  <rect class="svg-box acc" x="270" y="30" width="200" height="240" rx="10"/>
+  <text class="svg-text" x="370" y="58" text-anchor="middle">Worker (TypeScript)</text>
+  <text class="svg-sub" x="370" y="90" text-anchor="middle">fetch(): 정적 파일 + /api/*</text>
+  <text class="svg-sub" x="370" y="112" text-anchor="middle">인증: Bearer 토큰</text>
+  <text class="svg-sub" x="370" y="150" text-anchor="middle">pipeline: 임베딩 → 인덱싱</text>
+  <text class="svg-sub" x="370" y="172" text-anchor="middle">(요청 직후 waitUntil)</text>
+  <text class="svg-sub" x="370" y="210" text-anchor="middle">scheduled(): 매시간 Cron</text>
+  <text class="svg-sub" x="370" y="232" text-anchor="middle">밀린 항목 재처리</text>
+  <!-- d1 -->
+  <rect class="svg-box ok" x="570" y="20" width="180" height="70" rx="10"/>
+  <text class="svg-text" x="660" y="50" text-anchor="middle">D1 (원본)</text>
+  <text class="svg-sub" x="660" y="70" text-anchor="middle">텍스트 + 벡터 사본</text>
+  <!-- ai -->
+  <rect class="svg-box" x="570" y="115" width="180" height="70" rx="10"/>
+  <text class="svg-text" x="660" y="145" text-anchor="middle">Workers AI</text>
+  <text class="svg-sub" x="660" y="165" text-anchor="middle">bge-m3 (저장할 때만)</text>
+  <!-- vectorize -->
+  <rect class="svg-box" x="570" y="210" width="180" height="70" rx="10"/>
+  <text class="svg-text" x="660" y="240" text-anchor="middle">Vectorize (인덱스)</text>
+  <text class="svg-sub" x="660" y="260" text-anchor="middle">queryById로 유사 조회</text>
+  <!-- arrows -->
+  <line class="svg-line" x1="180" y1="85" x2="266" y2="85" marker-end="url(#arr)"/>
+  <text class="svg-label" x="223" y="76" text-anchor="middle">/api/*</text>
+  <line class="svg-line" x1="470" y1="60" x2="566" y2="55" marker-end="url(#arr)"/>
+  <line class="svg-line" x1="470" y1="150" x2="566" y2="150" marker-end="url(#arr)"/>
+  <line class="svg-line" x1="470" y1="240" x2="566" y2="245" marker-end="url(#arr)"/>
+</svg>
+<figcaption>찾기 경로(키워드 검색, 유사 조회)는 Workers AI를 거치지 않습니다.</figcaption>
+</figure>
+
+<!-- ─────────────────────────────── -->
+<h2 id="schema">2. D1 스키마</h2>
+<p>테이블은 <code>bookmarks</code> 하나뿐입니다. 북마크의 텍스트와 벡터 사본, 임베딩 진행 상태를 한 행에 모두 담습니다.</p>
+
+<pre><code>-- migrations/0001_init.sql
+CREATE TABLE bookmarks (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  url          TEXT    NOT NULL UNIQUE,
+  title        TEXT    NOT NULL DEFAULT '',
+  description  TEXT    NOT NULL DEFAULT '',   -- meta description
+  memo         TEXT    NOT NULL DEFAULT '',
+  content      TEXT    NOT NULL DEFAULT '',   -- 본문 앞부분 (~2,000자), 재임베딩용
+  created_at   INTEGER NOT NULL,              -- 서버 시각, Unix ms
+
+  embed_status   TEXT    NOT NULL DEFAULT 'pending'
+                 CHECK (embed_status IN ('pending', 'embedded', 'indexed')),
+  embed_model    TEXT,                        -- '@cf/baai/bge-m3'
+  embedding      BLOB,                        -- Float32 × 1024 = 4,096 bytes
+  embed_attempts INTEGER NOT NULL DEFAULT 0,  -- 현재 단계의 연속 실패 횟수
+  embed_error    TEXT                         -- 마지막 실패 메시지
+);
+
+CREATE INDEX idx_bookmarks_created_at ON bookmarks (created_at);
+CREATE INDEX idx_bookmarks_unfinished ON bookmarks (embed_status)
+  WHERE embed_status != 'indexed';</code></pre>
+
+<h3>컬럼별 설계 이유</h3>
+<div class="table-wrap">
+<table>
+  <tr><th>컬럼</th><th>설계 이유</th></tr>
+  <tr><td><code>id</code></td><td>Vectorize의 벡터 ID로도 사용합니다(<code>"42"</code>처럼 문자열로 변환). <code>AUTOINCREMENT</code>를 붙인 이유는 아래 주의 상자에서 설명합니다.</td></tr>
+  <tr><td><code>url</code></td><td><code>UNIQUE</code> 제약으로 중복 저장을 데이터베이스 수준에서 거부합니다. 애플리케이션 코드에서 먼저 확인하더라도, 동시에 두 번 저장하는 경우까지 막아 주는 것은 이 제약입니다.</td></tr>
+  <tr><td><code>title</code>, <code>description</code>, <code>memo</code></td><td>임베딩 입력이면서 키워드 검색 대상입니다.</td></tr>
+  <tr><td><code>content</code></td><td>임베딩 입력이지만 키워드 검색에서는 제외합니다. 본문에 우연히 들어간 단어 때문에 검색 결과가 지저분해지는 것을 막기 위해서입니다. 그래도 보관해 두는 이유는 나중에 모델을 바꿨을 때 원문 페이지 없이 다시 임베딩하기 위해서입니다.</td></tr>
+  <tr><td><code>created_at</code></td><td>정수(Unix ms)로 저장하면 날짜 범위 필터가 단순한 숫자 비교가 되고, 인덱스도 효율적으로 동작합니다. Unix ms는 시간대와 무관한 절대 시각이므로, KST 변환은 API의 입출력에서만 합니다. 응답에는 <code>2026-09-26T19:58:00+09:00</code> 형식의 문자열을 함께 담고, 날짜 필터의 <code>2026-09-26</code>은 KST 하루(00:00~23:59)로 해석합니다.</td></tr>
+  <tr><td><code>embed_status</code></td><td>임베딩 파이프라인의 진행 단계를 기록합니다. 다음 절에서 자세히 설명합니다.</td></tr>
+  <tr><td><code>embed_model</code></td><td>어떤 모델로 만든 벡터인지 기록합니다. 모델을 바꾸면 이 값이 다른 행만 골라서 다시 임베딩합니다.</td></tr>
+  <tr><td><code>embedding</code></td><td>벡터 사본입니다. <code>Float32Array</code>의 바이트를 그대로 저장하므로 북마크 하나에 정확히 4,096바이트가 듭니다. D1만 내보내면 벡터까지 옮겨지고, Vectorize는 이 값으로 AI 호출 없이 재구축할 수 있습니다.</td></tr>
+  <tr><td><code>embed_attempts</code></td><td>현재 단계에서 연속으로 실패한 횟수입니다. 5회에 도달하면 Cron이 더 이상 시도하지 않고, 단계가 성공하면 0으로 초기화합니다.</td></tr>
+  <tr><td><code>embed_error</code></td><td>실패 원인을 남겨서 웹 UI나 SQL로 확인할 수 있게 합니다.</td></tr>
+</table>
+</div>
+
+<div class="callout warn">
+  <strong>왜 AUTOINCREMENT가 필요한가</strong>
+  SQLite의 기본 <code>INTEGER PRIMARY KEY</code>는 가장 큰 ID의 행을 지우면 그 번호를 다시 사용할 수 있습니다. 그런데 북마크를 삭제할 때 D1 삭제는 성공하고 Vectorize 삭제가 실패하면, Vectorize에는 옛 벡터가 <code>"42"</code>라는 ID로 남아 있게 됩니다. 이때 새 북마크가 42번을 다시 받으면 옛 벡터가 새 북마크의 것처럼 보이는 오류가 생깁니다. <code>AUTOINCREMENT</code>는 한 번 쓴 번호를 절대 재사용하지 않으므로 이 문제를 원천적으로 막습니다.
+</div>
+
+<div class="callout">
+  <strong>인덱스 두 개의 역할</strong>
+  <code>idx_bookmarks_created_at</code>은 최신순 정렬과 날짜 범위 필터를 빠르게 합니다. <code>idx_bookmarks_unfinished</code>는 부분 인덱스(partial index)라서 아직 인덱싱이 끝나지 않은 소수의 행만 담습니다. 그래서 Cron이 "처리할 항목"을 찾을 때 전체 테이블을 훑지 않습니다.
+</div>
+
+<h3>키워드 검색 쿼리</h3>
+<p><code>LIKE</code> 검색은 인덱스를 쓰지 못하므로 전체 행을 훑습니다. 수천 개 규모에서는 충분히 빠르지만, 목록을 조회할 때 4KB짜리 <code>embedding</code> 컬럼은 절대 읽지 않도록 필요한 컬럼만 명시합니다.</p>
+<pre><code>SELECT id, url, title, memo, created_at, embed_status
+FROM bookmarks
+WHERE (title LIKE ?1 ESCAPE '\' OR memo LIKE ?1 ESCAPE '\'
+       OR description LIKE ?1 ESCAPE '\')        -- content는 검색 제외
+  AND created_at BETWEEN ?2 AND ?3
+ORDER BY created_at DESC
+LIMIT ?4 OFFSET ?5;</code></pre>
+<p>검색어에 들어 있는 <code>%</code>와 <code>_</code>는 <code>\%</code>, <code>\_</code>로 이스케이프합니다. 그렇지 않으면 "100%"를 검색했을 때 의도하지 않은 결과가 나옵니다. 참고로 SQLite의 <code>LIKE</code>는 영문 대소문자를 구분하지 않고, 한글에는 대소문자 개념이 없으므로 따로 처리할 필요가 없습니다.</p>
+
+<!-- ─────────────────────────────── -->
+<h2 id="states">3. 임베딩 상태 전이</h2>
+<p>저장은 "D1에 텍스트 저장 → 임베딩 → D1에 벡터 기록 → Vectorize 삽입" 순서로 진행됩니다. 각 단계는 따로 실패할 수 있으므로, 행마다 어디까지 끝났는지를 <code>embed_status</code>에 기록합니다.</p>
+
+<figure>
+<svg viewBox="0 0 760 230" role="img" aria-label="pending, embedded, indexed 세 상태의 전이도">
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"/>
+    </marker>
+    <marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" style="fill: var(--bad)"/>
+    </marker>
+  </defs>
+  <rect class="svg-box warn" x="20" y="70" width="180" height="76" rx="12"/>
+  <text class="svg-text" x="110" y="102" text-anchor="middle">pending</text>
+  <text class="svg-sub" x="110" y="124" text-anchor="middle">텍스트만 있음</text>
+
+  <rect class="svg-box acc" x="290" y="70" width="180" height="76" rx="12"/>
+  <text class="svg-text" x="380" y="102" text-anchor="middle">embedded</text>
+  <text class="svg-sub" x="380" y="124" text-anchor="middle">D1에 벡터 있음</text>
+
+  <rect class="svg-box ok" x="560" y="70" width="180" height="76" rx="12"/>
+  <text class="svg-text" x="650" y="102" text-anchor="middle">indexed</text>
+  <text class="svg-sub" x="650" y="124" text-anchor="middle">Vectorize에도 있음</text>
+
+  <line class="svg-line" x1="200" y1="108" x2="286" y2="108" marker-end="url(#arr2)"/>
+  <text class="svg-label" x="243" y="98" text-anchor="middle">Workers AI</text>
+  <line class="svg-line" x1="470" y1="108" x2="556" y2="108" marker-end="url(#arr2)"/>
+  <text class="svg-label" x="513" y="98" text-anchor="middle">upsert</text>
+
+  <path class="svg-line bad" d="M80,146 C60,200 160,200 140,150" marker-end="url(#arr3)"/>
+  <text class="svg-label bad" x="110" y="215" text-anchor="middle">실패 → 그대로 두고 재시도</text>
+  <path class="svg-line bad" d="M350,146 C330,200 430,200 410,150" marker-end="url(#arr3)"/>
+  <text class="svg-label bad" x="380" y="215" text-anchor="middle">실패 → 그대로 두고 재시도</text>
+
+  <path class="svg-line" d="M650,70 C650,20 380,20 380,66" marker-end="url(#arr2)"/>
+  <text class="svg-label" x="515" y="30" text-anchor="middle">재구축: indexed → embedded (AI 호출 없음)</text>
+</svg>
+<figcaption>실패하면 상태가 바뀌지 않고, 다음 처리 시점에 같은 단계부터 다시 시작합니다.</figcaption>
+</figure>
+
+<p>이렇게 단계를 나누면 처리 로직 하나(<code>pipeline.ts</code>)로 세 가지 상황을 모두 다룰 수 있습니다.</p>
+<ul>
+  <li><strong>새 북마크:</strong> 저장 요청에 응답한 직후 <code>ctx.waitUntil()</code>로 파이프라인을 실행합니다. 따라서 팝업은 임베딩을 기다리지 않고 바로 닫힙니다.</li>
+  <li><strong>실패한 항목:</strong> 매시간 Cron이 <code>embed_status != 'indexed' AND embed_attempts &lt; 5</code>인 행을 최대 N개 가져와서 파이프라인에 다시 넣습니다. 5회 연속 실패한 항목은 웹 UI에 "임베딩 실패"로 표시되고, <code>UPDATE bookmarks SET embed_attempts = 0 WHERE id = ?</code>로 횟수를 되돌리면 다시 시도합니다.</li>
+  <li><strong>Vectorize 재구축:</strong> SQL 한 줄(<code>UPDATE bookmarks SET embed_status = 'embedded' WHERE embed_status = 'indexed'</code>)로 상태를 되돌리면, Cron이 D1의 벡터 사본을 Vectorize에 다시 넣습니다. 임베딩을 다시 계산하지 않으므로 AI 비용이 들지 않습니다.</li>
+</ul>
+
+<div class="callout">
+  <strong>임베딩 입력 텍스트</strong>
+  <code>제목\n메모\ndescription\n본문</code> 순서로 이어 붙입니다. 메모를 앞쪽에 두는 이유는 내가 직접 쓴 설명이 페이지 본문보다 의도를 더 정확하게 나타내기 때문입니다. URL은 넣지 않습니다.
+</div>
+
+<!-- ─────────────────────────────── -->
+<h2 id="vectorize">4. Vectorize 인덱스</h2>
+<pre><code>npx wrangler vectorize create bookmarks --dimensions=1024 --metric=cosine</code></pre>
+<ul>
+  <li><strong>차원 1024, cosine 거리:</strong> bge-m3의 출력에 맞춘 값입니다. 인덱스를 만든 뒤에는 바꿀 수 없습니다.</li>
+  <li><strong>메타데이터 없음:</strong> 날짜 필터는 키워드 검색에만 적용하기로 했으므로, 벡터에는 ID와 값만 넣습니다. 제목 같은 표시용 정보는 D1에서 가져옵니다.</li>
+  <li><strong>유사 조회:</strong> <code>queryById("42", { topK: 11 })</code>로 가장 가까운 11개를 받고, 자기 자신을 뺀 10개를 D1에서 조회해 점수 순서대로 돌려줍니다.</li>
+</ul>
+
+<div class="callout warn">
+  <strong>최종적 일관성(eventual consistency)</strong>
+  Vectorize는 삽입 요청을 받은 뒤 몇 초가 지나야 검색에 반영됩니다. 그래서 방금 저장한 북마크로 곧바로 유사 조회를 하면 결과가 비어 있을 수 있습니다. 또한 삭제가 실패해서 Vectorize에 벡터가 남는 경우, 유사 조회 결과에 D1에 없는 ID가 섞일 수 있습니다. 그래서 D1을 조회할 때 존재하지 않는 ID는 조용히 버리도록 구현합니다.
+</div>
+
+<h3>교체 가능한 인터페이스</h3>
+<p>계획서의 이식성 요구에 따라, 코드의 나머지 부분은 Vectorize를 직접 호출하지 않고 아래 인터페이스만 사용합니다. 나중에 로컬 sqlite-vec이나 pgvector로 옮길 때는 이 인터페이스의 구현체 하나만 새로 작성하면 됩니다.</p>
+<pre><code>interface VectorStore {
+  upsert(items: { id: number; vector: Float32Array }[]): Promise&lt;void&gt;;
+  similar(id: number, k: number): Promise&lt;{ id: number; score: number }[]&gt;;
+  delete(ids: number[]): Promise&lt;void&gt;;
+}</code></pre>
+
+<!-- ─────────────────────────────── -->
+<h2 id="api">5. API 엔드포인트</h2>
+<p><code>/api/*</code> 경로는 모두 <code>Authorization: Bearer &lt;토큰&gt;</code> 헤더가 필요하고, 토큰이 틀리면 <code>401</code>을 돌려줍니다. 정적 페이지는 데이터를 담고 있지 않으므로 인증 없이 제공합니다.</p>
+
+<div class="table-wrap">
+<table>
+  <tr><th>메서드</th><th>경로</th><th>역할</th></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/</code></td><td>검색 UI (정적 파일)</td></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/save</code></td><td>저장 팝업 (정적 파일)</td></tr>
+  <tr><td><span class="method POST">POST</span></td><td><code>/api/bookmarks</code></td><td>북마크 저장</td></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/api/bookmarks/lookup?url=</code></td><td>이미 저장한 URL인지 확인 (팝업이 열릴 때 호출)</td></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/api/bookmarks?q=&amp;from=&amp;to=&amp;limit=&amp;offset=</code></td><td>키워드 검색과 날짜 필터. <code>q</code>가 없으면 최신순 목록</td></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/api/bookmarks/:id</code></td><td>북마크 하나의 상세 정보 (본문 포함)</td></tr>
+  <tr><td><span class="method GET">GET</span></td><td><code>/api/bookmarks/:id/similar?k=10</code></td><td>유사 북마크</td></tr>
+  <tr><td><span class="method DELETE">DELETE</span></td><td><code>/api/bookmarks/:id</code></td><td>삭제 (D1 → Vectorize 순서)</td></tr>
+  <tr><td><span class="method CRON">CRON</span></td><td><code>0 * * * *</code></td><td>매시간 밀린 임베딩·인덱싱 처리</td></tr>
+</table>
+</div>
+
+<h3>저장 요청과 응답</h3>
+<pre><code>POST /api/bookmarks
+{
+  "url": "https://example.com/post",
+  "title": "글 제목",
+  "description": "meta description",
+  "content": "본문 앞부분 ...",
+  "memo": "나중에 읽을 것"
+}
+
+201 Created   { "id": 42, "embed_status": "pending" }
+409 Conflict  { "error": "duplicate", "id": 17 }     ← 이미 저장된 URL
+400 Bad Request { "error": "url is required" }</code></pre>
+<p>서버는 입력 길이도 검증합니다. 예를 들어 <code>content</code>는 2,000자, <code>memo</code>는 2,000자를 넘으면 잘라서 저장합니다. 북마클릿이 잘라서 보내더라도 서버에서 한 번 더 제한해야 잘못된 요청 때문에 저장소가 커지는 일을 막을 수 있습니다.</p>
+
+<h3>유사 조회 응답</h3>
+<pre><code>GET /api/bookmarks/42/similar?k=10
+
+200 OK
+{
+  "status": "indexed",
+  "items": [
+    { "id": 7,  "score": 0.83, "title": "...", "url": "...", "created_at": 1790000000000 },
+    { "id": 19, "score": 0.79, "title": "...", "url": "...", "created_at": 1789000000000 }
+  ]
+}</code></pre>
+<p>기준 북마크가 아직 <code>indexed</code> 상태가 아니면 <code>items</code>를 빈 배열로 돌려주고 <code>status</code>에 현재 상태를 담습니다. 그러면 UI가 "임베딩 대기 중"이라고 안내할 수 있습니다.</p>
+
+<!-- ─────────────────────────────── -->
+<h2 id="bookmarklet">6. 북마클릿과 팝업의 통신</h2>
+<p>팝업은 내 Worker 도메인에서 열리므로, 팝업이 보내는 API 요청은 같은 출처(same-origin) 요청이 됩니다. 따라서 <strong>CORS 설정이 전혀 필요 없습니다.</strong> 팝업 방식을 선택한 덕분에 CSP 문제와 CORS 문제가 함께 사라집니다.</p>
+
+<p>다만 팝업이 로딩을 마치기 전에 데이터를 보내면 메시지가 유실되므로, 짧은 핸드셰이크를 거칩니다.</p>
+<ol>
+  <li>북마클릿이 현재 페이지에서 링크, 제목, description, 본문 앞부분을 추출합니다.</li>
+  <li>북마클릿이 <code>window.open("https://&lt;내 도메인&gt;/save")</code>로 팝업을 엽니다.</li>
+  <li>팝업이 로딩을 마치면 <code>window.opener.postMessage("ready", "*")</code>를 보냅니다.</li>
+  <li>북마클릿이 "ready"를 받으면 <code>popup.postMessage(data, "https://&lt;내 도메인&gt;")</code>로 데이터를 보냅니다. 수신자 출처를 내 도메인으로 지정하므로 다른 창이 데이터를 가로챌 수 없습니다.</li>
+  <li>팝업은 <code>event.source === window.opener</code>인지 확인한 뒤 데이터를 받아 화면에 채우고, <code>lookup</code>으로 중복 여부를 먼저 알려 줍니다.</li>
+  <li>사용자가 메모를 쓰고 저장을 누르면, 팝업이 localStorage에 보관한 토큰으로 <code>POST /api/bookmarks</code>를 호출합니다.</li>
+</ol>
+
+<div class="callout ok">
+  <strong>보안 측면</strong>
+  아무 사이트나 내 팝업을 열고 가짜 데이터를 보낼 수는 있습니다. 하지만 사용자가 직접 저장 버튼을 눌러야만 저장되고, 토큰은 내 도메인의 localStorage에만 있어서 다른 사이트가 읽을 수 없습니다. 혼자 쓰는 서비스에서는 이 정도로 충분합니다.
+</div>
+
+<!-- ─────────────────────────────── -->
+<h2 id="layout">7. 파일 구조</h2>
+<pre><code>vector/
+├─ wrangler.jsonc            # D1, Vectorize, AI 바인딩, Cron, 정적 파일 설정
+├─ migrations/
+│  └─ 0001_init.sql          # 위 스키마
+├─ src/
+│  ├─ index.ts               # fetch()·scheduled() 진입점과 라우팅
+│  ├─ auth.ts                # Bearer 토큰 검증 (상수 시간 비교)
+│  ├─ routes.ts              # /api/bookmarks 핸들러
+│  ├─ db.ts                  # D1 쿼리 모음
+│  ├─ embed.ts               # 입력 텍스트 조립 + Workers AI 호출
+│  ├─ pipeline.ts            # pending → embedded → indexed 처리
+│  └─ vector-store.ts        # VectorStore 인터페이스 + Vectorize 구현
+└─ public/
+   ├─ index.html             # 검색 UI + 북마클릿 설치 링크
+   └─ save.html              # 저장 팝업</code></pre>
+<p>파일 하나가 한 가지 역할만 맡도록 나눴습니다. 특히 <code>db.ts</code>와 <code>vector-store.ts</code>가 Cloudflare 전용 API를 감싸고 있으므로, 다른 환경으로 옮길 때 고쳐야 할 곳이 이 두 파일로 모입니다.</p>
+
+<!-- ─────────────────────────────── -->
+<h2 id="budget">8. 무료 티어 예산</h2>
+<div class="table-wrap">
+<table>
+  <tr><th>자원</th><th>무료 한도</th><th>이 서비스의 사용량</th></tr>
+  <tr><td>Vectorize 저장</td><td>저장 차원 500만</td><td>북마크 1개 = 1,024차원 → 약 4,880개가 상한</td></tr>
+  <tr><td>Vectorize 조회</td><td>월 3,000만 조회 차원</td><td>유사 조회 1회 = 1,024 → 월 약 29,000회</td></tr>
+  <tr><td>D1 읽기</td><td>하루 500만 행</td><td><code>LIKE</code> 검색 1회 = 전체 행 수. 5,000개 기준 하루 1,000회 검색까지 가능</td></tr>
+  <tr><td>D1 저장 용량</td><td>5GB</td><td>북마크 1개 ≈ 텍스트 수 KB + 벡터 4KB → 5,000개여도 수십 MB</td></tr>
+  <tr><td>Workers AI</td><td>하루 무료 사용량 제공</td><td>저장할 때만 호출하므로 개인 사용 규모에서는 여유가 있음</td></tr>
+</table>
+</div>
+<p>한도 수치는 현재 Cloudflare 문서를 기준으로 적었으며, 추후 바뀔 수 있습니다. 결론적으로 병목은 Vectorize 저장 한도(약 4,880개)이고, 나머지 자원은 개인 사용 규모에서 여유가 있습니다.</p>
+
+<!-- ─────────────────────────────── -->
+<h2 id="open">9. 확인한 사항</h2>
+<p>초안에서 임시로 정했던 세 항목을 아래와 같이 확정했고, 위 본문에도 반영했습니다.</p>
+<ol class="q">
+  <li><strong>본문 보관:</strong> <code>content</code>는 재임베딩용으로만 보관하고 키워드 검색에서는 제외합니다.</li>
+  <li><strong>재시도 횟수 제한:</strong> 같은 단계에서 5회 연속 실패하면 Cron이 멈추고, 웹 UI에 "임베딩 실패"로 표시합니다. 이를 위해 <code>embed_attempts</code> 컬럼을 추가했습니다.</li>
+  <li><strong>도메인:</strong> 보유한 도메인을 Worker에 연결합니다(Custom Domain). 나중에 다른 서버로 옮겨도 DNS만 바꾸면 북마클릿과 토큰을 그대로 쓸 수 있습니다. 구체적인 도메인 이름은 배포 단계에서 확인하겠습니다.</li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vector-bookmarks",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+
+  // public/ 의 정적 파일(검색 UI, 저장 팝업)을 먼저 찾고, 없으면 Worker 코드로 넘어간다.
+  "assets": {
+    "directory": "./public"
+  },
+
+  // D1: 원본 저장소. database_id 는 배포 단계에서 `wrangler d1 create` 결과로 교체한다.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vector-bookmarks",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  // Vectorize: 검색 전용 인덱스 (1024차원, cosine)
+  "vectorize": [
+    {
+      "binding": "VECTORIZE",
+      "index_name": "bookmarks"
+    }
+  ],
+
+  // Workers AI: 저장할 때만 bge-m3 임베딩 호출
+  "ai": {
+    "binding": "AI"
+  },
+
+  // 매시간 밀린 임베딩·인덱싱 작업 처리
+  "triggers": {
+    "crons": ["0 * * * *"]
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}
