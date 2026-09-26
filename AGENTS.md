@@ -1,6 +1,6 @@
 - Information about myself
   - The thing I like to develop is vectorized bookmark website.
-  - I have some knowledge about Python, server, and linear algebra.
+  - I have some knowledge about Python, Java, server, and linear algebra.
 - tools
   - Cloudflare
 
