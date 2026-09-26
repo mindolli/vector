@@ -414,6 +414,9 @@ LIMIT ?4 OFFSET ?5;</code></pre>
 │  ├─ embed.ts               # 입력 텍스트 조립 + Workers AI 호출
 │  ├─ pipeline.ts            # pending → embedded → indexed 처리
 │  └─ vector-store.ts        # VectorStore 인터페이스 + Vectorize 구현
+├─ test/                    # node:test 단위 테스트 (npm test)
+├─ scripts/
+│  └─ smoke.sh               # wrangler dev 대상 API 흐름 검증
 └─ public/
    ├─ index.html             # 검색 UI + 북마클릿 설치 링크
    └─ save.html              # 저장 팝업</code></pre>
@@ -476,7 +479,7 @@ LIMIT ?4 OFFSET ?5;</code></pre>
   <p class="goal">임베딩을 제외한 저장·조회·검색·삭제 API를 만들고, 로컬 <code>wrangler dev</code>에서 끝까지 검증합니다. 이 페이즈에서 저장한 북마크는 <code>pending</code> 상태로 남습니다.</p>
   <dl>
     <dt>파일</dt>
-    <dd><code>src/time.ts</code>, <code>src/auth.ts</code>, <code>src/db.ts</code>, <code>src/routes.ts</code>, <code>src/index.ts</code>(라우팅 추가), <code>.dev.vars.example</code></dd>
+    <dd><code>src/time.ts</code>, <code>src/auth.ts</code>, <code>src/db.ts</code>, <code>src/routes.ts</code>, <code>src/index.ts</code>(라우팅 추가), <code>.dev.vars.example</code>, <code>test/*.test.ts</code>, <code>scripts/smoke.sh</code></dd>
     <dt>엔드포인트</dt>
     <dd><code>POST /api/bookmarks</code>, <code>GET /api/bookmarks/lookup</code>, <code>GET /api/bookmarks</code>(검색·날짜 필터), <code>GET /api/bookmarks/:id</code>, <code>DELETE /api/bookmarks/:id</code>(D1에서만 삭제). 유사 조회는 3페이즈에서 추가합니다.</dd>
     <dt>진행 순서</dt>
@@ -498,8 +501,8 @@ LIMIT ?4 OFFSET ?5;</code></pre>
         <li>응답의 <code>created_at</code>이 <code>+09:00</code> 문자열이고, 목록 응답에 <code>embedding</code>과 <code>content</code>가 들어가지 않습니다.</li>
       </ul>
     </dd>
-    <dt>시작 전 확인</dt>
-    <dd>테스트 도구를 도입할지(예: Vitest), curl 검증 스크립트로 충분할지를 이 페이즈를 시작할 때 결정합니다.</dd>
+    <dt>검증 방법</dt>
+    <dd>순수 함수(<code>time.ts</code>, <code>auth.ts</code>)는 Node 내장 테스트 러너로 단위 테스트합니다(<code>npm test</code>, 추가 의존성 없음). API 전체 흐름은 <code>wrangler dev</code>에 요청을 보내는 <code>scripts/smoke.sh</code>로 확인합니다.</dd>
   </dl>
 </div>
 
