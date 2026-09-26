@@ -2,6 +2,8 @@
 // 입력 검증(길이 제한 등)은 routes.ts 가 끝낸 뒤 이곳으로 넘긴다.
 
 export type EmbedStatus = "pending" | "embedded" | "indexed";
+/** 아직 처리가 남은 상태. 파이프라인이 실패를 기록하거나 Cron 이 다시 집어 가는 대상이다. */
+export type UnfinishedStatus = Exclude<EmbedStatus, "indexed">;
 
 /** 클라이언트가 보내는 값 (POST /api/bookmarks 본문) */
 export type BookmarkInput = {
@@ -105,20 +107,24 @@ export async function getPipelineRow(db: D1Database, id: number): Promise<Pipeli
   return db.prepare(`SELECT ${PIPELINE_COLUMNS} FROM bookmarks WHERE id = ?1`).bind(id).first<PipelineRow>();
 }
 
-/** 아직 indexed 가 아니고 재시도 한도에 닿지 않은 행. 부분 인덱스(idx_bookmarks_unfinished)를 탄다. */
+/**
+ * 아직 indexed 가 아니고 재시도 한도에 닿지 않은 행. 부분 인덱스(idx_bookmarks_unfinished)를 탄다.
+ * createdBefore 보다 나중에 저장된 행은 저장 직후 작업(waitUntil)이 처리 중일 수 있으므로 뺀다.
+ */
 export async function listUnfinished(
   db: D1Database,
-  status: Exclude<EmbedStatus, "indexed">,
+  status: UnfinishedStatus,
   maxAttempts: number,
+  createdBefore: number,
   limit: number,
 ): Promise<PipelineRow[]> {
   const { results } = await db
     .prepare(
       `SELECT ${PIPELINE_COLUMNS} FROM bookmarks
-       WHERE embed_status != 'indexed' AND embed_status = ?1 AND embed_attempts < ?2
-       ORDER BY id LIMIT ?3`,
+       WHERE embed_status != 'indexed' AND embed_status = ?1 AND embed_attempts < ?2 AND created_at < ?3
+       ORDER BY id LIMIT ?4`,
     )
-    .bind(status, maxAttempts, limit)
+    .bind(status, maxAttempts, createdBefore, limit)
     .all<PipelineRow>();
   return results;
 }
@@ -139,22 +145,38 @@ export async function markEmbedded(db: D1Database, id: number, vector: Float32Ar
   return meta.changes > 0;
 }
 
-/** embedded → indexed (여러 행을 한 번에) */
-export async function markIndexed(db: D1Database, ids: number[]): Promise<void> {
-  if (ids.length === 0) return;
-  await db
+/** embedded → indexed (여러 행을 한 번에). 실제로 바뀐 id 만 돌려준다. */
+export async function markIndexed(db: D1Database, ids: number[]): Promise<Set<number>> {
+  if (ids.length === 0) return new Set();
+  const { results } = await db
     .prepare(
       `UPDATE bookmarks SET embed_status = 'indexed', embed_attempts = 0, embed_error = NULL
-       WHERE embed_status = 'embedded' AND id IN (${placeholders(ids.length)})`,
+       WHERE embed_status = 'embedded' AND id IN (${placeholders(ids.length)})
+       RETURNING id`,
     )
     .bind(...ids)
-    .run();
+    .all<{ id: number }>();
+  return new Set(results.map((r) => r.id));
 }
 
-/** 실패를 기록한다. permanent 이면 곧바로 재시도 한도까지 올려서 Cron 이 다시 시도하지 않게 한다. */
+/** ids 가운데 D1 에 아직 남아 있는 것 */
+export async function existingIds(db: D1Database, ids: number[]): Promise<Set<number>> {
+  if (ids.length === 0) return new Set();
+  const { results } = await db
+    .prepare(`SELECT id FROM bookmarks WHERE id IN (${placeholders(ids.length)})`)
+    .bind(...ids)
+    .all<{ id: number }>();
+  return new Set(results.map((r) => r.id));
+}
+
+/**
+ * 실패를 기록한다. permanent 이면 곧바로 재시도 한도까지 올려서 Cron 이 다시 시도하지 않게 한다.
+ * status 는 실패가 일어난 단계의 상태다. 그 사이에 다른 작업이 행을 다음 단계로 옮겼으면 기록하지 않는다.
+ */
 export async function recordFailure(
   db: D1Database,
   id: number,
+  status: UnfinishedStatus,
   message: string,
   maxAttempts: number,
   permanent: boolean,
@@ -162,10 +184,10 @@ export async function recordFailure(
   await db
     .prepare(
       `UPDATE bookmarks
-       SET embed_attempts = CASE WHEN ?3 THEN ?4 ELSE MIN(embed_attempts + 1, ?4) END, embed_error = ?2
-       WHERE id = ?1`,
+       SET embed_attempts = CASE WHEN ?4 THEN ?5 ELSE MIN(embed_attempts + 1, ?5) END, embed_error = ?3
+       WHERE id = ?1 AND embed_status = ?2`,
     )
-    .bind(id, message.slice(0, 500), permanent ? 1 : 0, maxAttempts)
+    .bind(id, status, message.slice(0, 500), permanent ? 1 : 0, maxAttempts)
     .run();
 }
 

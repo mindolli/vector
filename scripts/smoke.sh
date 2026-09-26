@@ -7,66 +7,27 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-8798}"
-BASE="http://localhost:$PORT"
-STATE="$(mktemp -d)"
-RESP="$STATE/resp.json"
-DEV_PID=""
-PASS=0
-FAIL=0
+source scripts/lib.sh
 
-cleanup() {
-  [[ -n "$DEV_PID" ]] && kill "$DEV_PID" 2>/dev/null || true
-  pkill -f "persist-to $STATE" 2>/dev/null || true
-  rm -rf "$STATE"
-}
+cleanup() { stop_dev; rm -rf "$STATE"; }
 trap cleanup EXIT
-
-TOKEN="$(grep '^API_TOKEN=' .dev.vars | cut -d= -f2-)"
-[[ -n "$TOKEN" ]] || { echo ".dev.vars 에 API_TOKEN 이 없습니다 (.dev.vars.example 참고)"; exit 1; }
-
-# ── 도우미 ─────────────────────────────────────────
-
-# call METHOD PATH [BODY] [TOKEN]   BODY 가 @로 시작하면 파일에서 읽는다. TOKEN 에 "" 를 주면 인증 헤더 없음.
-call() {
-  local method="$1" path="$2" body="${3-}" auth="${4-$TOKEN}"
-  local args=(-s -o "$RESP" -w '%{http_code}' -X "$method")
-  [[ -n "$auth" ]] && args+=(-H "Authorization: Bearer $auth")
-  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data-binary "$body")
-  STATUS="$(curl "${args[@]}" "$BASE$path")"
-}
-
-# js '표현식'   응답 JSON 을 b 로 두고 표현식을 평가한다.
-js() { node -e "const b=JSON.parse(require('fs').readFileSync(0,'utf8')); process.stdout.write(String($1))" < "$RESP"; }
-
-enc() { node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "$1"; }
-
-check() {
-  local name="$1"; shift
-  if "$@"; then PASS=$((PASS + 1)); echo "  PASS  $name"
-  else FAIL=$((FAIL + 1)); echo "  FAIL  $name  (status=$STATUS body=$(head -c 300 "$RESP"))"; fi
-}
-status_is() { [[ "$STATUS" == "$1" ]]; }
-js_true() { [[ "$(js "$1")" == "true" ]]; }
 
 # ── 준비: 임시 D1 + 경계 시각 데이터 ─────────────────────
 
 echo "준비: 임시 D1 에 마이그레이션 적용"
-npx wrangler d1 migrations apply vector-bookmarks --local --persist-to "$STATE" > "$STATE/migrate.log" 2>&1
+migrate
 
 # KST 2026-09-26 의 시작·끝과 그 1ms 바깥
 read -r START END < <(node -e 'import("./src/time.ts").then(m => { const r = m.kstDayRange("2026-09-26"); console.log(r.start, r.end); })')
-npx wrangler d1 execute vector-bookmarks --local --persist-to "$STATE" --command "
+sql "
   INSERT INTO bookmarks (url, title, created_at) VALUES
     ('https://edge.test/before', '경계 before', $((START - 1))),
     ('https://edge.test/start',  '경계 start',  $START),
     ('https://edge.test/end',    '경계 end',    $END),
-    ('https://edge.test/after',  '경계 after',  $((END + 1)));" > "$STATE/seed.log" 2>&1
+    ('https://edge.test/after',  '경계 after',  $((END + 1)));" > /dev/null
 
 echo "준비: wrangler dev --local (포트 $PORT)"
-npx wrangler dev --local --port "$PORT" --persist-to "$STATE" > "$STATE/dev.log" 2>&1 &
-DEV_PID=$!
-for _ in $(seq 1 60); do curl -s -o /dev/null "$BASE/" && break; sleep 0.5; done
-curl -s -o /dev/null "$BASE/" || { echo "서버가 뜨지 않았습니다:"; cat "$STATE/dev.log"; exit 1; }
+start_dev local
 
 # ── 인증 ───────────────────────────────────────────
 echo "인증"
@@ -151,6 +112,4 @@ call PUT /api/bookmarks '{}';            check "허용하지 않는 메서드는
 call GET /api/nothing;                   check "없는 경로는 404" status_is 404
 call GET /api/bookmarks/abc;             check "숫자가 아닌 id 는 404" status_is 404
 
-echo
-echo "결과: PASS $PASS, FAIL $FAIL"
-[[ "$FAIL" -eq 0 ]]
+summary

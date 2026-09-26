@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "wrangler dev",
     "dev:local": "wrangler dev --local",
-    "deploy": "wrangler deploy --env production",
+    "deploy": "bash scripts/deploy.sh",
     "typecheck": "tsc --noEmit",
     "cf-typegen": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply vector-bookmarks --local",

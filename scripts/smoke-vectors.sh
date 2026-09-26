@@ -10,53 +10,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PORT="${PORT:-8795}"
-BASE="http://localhost:$PORT"
+source scripts/lib.sh
 INDEX="bookmarks-dev"
 CRON_URL="$BASE/__scheduled?cron=0+*+*+*+*"
-STATE="$(mktemp -d)"
-RESP="$STATE/resp.json"
-LOG=""
-DEV_PID=""
 CREATED=()
-PASS=0
-FAIL=0
 
-TOKEN="$(grep '^API_TOKEN=' .dev.vars | cut -d= -f2-)"
-[[ -n "$TOKEN" ]] || { echo ".dev.vars 에 API_TOKEN 이 없습니다"; exit 1; }
+# ── 이 스크립트 전용 도우미 ────────────────────────────
 
-# ── 도우미 ─────────────────────────────────────────
-
-call() {
-  local method="$1" path="$2" body="${3-}"
-  local args=(-s -o "$RESP" -w '%{http_code}' -X "$method" -H "Authorization: Bearer $TOKEN")
-  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data-binary "$body")
-  STATUS="$(curl "${args[@]}" "$BASE$path")"
-}
-js() { node -e "const b=JSON.parse(require('fs').readFileSync(0,'utf8')); process.stdout.write(String($1))" < "$RESP"; }
-check() {
-  local name="$1"; shift
-  if "$@"; then PASS=$((PASS + 1)); echo "  PASS  $name"
-  else FAIL=$((FAIL + 1)); echo "  FAIL  $name  (status=${STATUS-} body=$(head -c 300 "$RESP" 2>/dev/null))"; fi
-}
-js_true() { [[ "$(js "$1")" == "true" ]]; }
-
-start_dev() { # start_dev local|remote
-  LOG="$STATE/dev-$1-$(date +%s).log"
-  local flags=(--port "$PORT" --persist-to "$STATE" --test-scheduled)
-  [[ "$1" == "local" ]] && flags+=(--local)
-  npx wrangler dev "${flags[@]}" > "$LOG" 2>&1 &
-  DEV_PID=$!
-  for _ in $(seq 1 90); do curl -s -o /dev/null "$BASE/" && return 0; sleep 0.5; done
-  echo "서버가 뜨지 않았습니다:"; cat "$LOG"; exit 1
-}
-stop_dev() {
-  [[ -n "$DEV_PID" ]] && kill "$DEV_PID" 2>/dev/null || true
-  pkill -f "persist-to $STATE" 2>/dev/null || true
-  DEV_PID=""
-  sleep 1
-}
 run_cron() { curl -s -o /dev/null "$CRON_URL"; sleep 2; }
-sql() { npx wrangler d1 execute vector-bookmarks --local --persist-to "$STATE" --json --command "$1" 2>/dev/null; }
 
 save() { # save JSON → 새 id 를 SAVED 에 담는다
   call POST /api/bookmarks "$1"
@@ -84,7 +45,11 @@ cleanup() {
 trap cleanup EXIT
 
 echo "준비: 임시 D1 에 마이그레이션 적용"
-npx wrangler d1 migrations apply vector-bookmarks --local --persist-to "$STATE" > /dev/null 2>&1
+migrate
+# 개발용 인덱스는 npm run dev 의 북마크(id 1, 2, 3 …)와 공유한다. 테스트 id 가 겹치면 개발 벡터를
+# 덮어쓰고 정리할 때 지워 버리므로, 테스트용 id 는 1,000,000,001 부터 시작하게 한다.
+ID_BASE=1000000000
+sql "INSERT INTO sqlite_sequence (name, seq) VALUES ('bookmarks', $ID_BASE)" > /dev/null
 
 # ── A. 원격 AI 없이: 실패 기록 ─────────────────────────
 echo "A. --local (원격 AI 꺼짐)"
@@ -93,9 +58,16 @@ save '{"url":"https://smoke.test/transient","title":"Cloudflare Workers에서 �
 TRANSIENT="$SAVED"
 save '{"url":"https://smoke.test/empty"}'
 EMPTY="$SAVED"
+check "테스트 id 는 개발용 id 와 겹치지 않는 범위 (> $ID_BASE)" [ "$TRANSIENT" -gt "$ID_BASE" ]
 sleep 3
 detail "$TRANSIENT"; check "AI 호출 실패: pending 유지, attempts=1, 오류 기록" js_true 'b.embed_status==="pending" && b.embed_attempts===1 && !!b.embed_error'
 detail "$EMPTY";     check "빈 입력: 곧바로 attempts=5 (영구 실패)" js_true 'b.embed_status==="pending" && b.embed_attempts===5 && b.embed_error.includes("EmptyInputError")'
+run_cron
+detail "$TRANSIENT"; check "Cron 은 저장한 지 60초가 안 된 행을 건너뜀 (attempts 그대로 1)" js_true 'b.embed_attempts===1'
+stop_dev
+# 테스트 안에서만: 저장 시각을 10분 앞으로 당겨서 Cron 대상이 되게 한다.
+sql "UPDATE bookmarks SET created_at = created_at - 600000" > /dev/null
+start_dev local
 run_cron
 detail "$TRANSIENT"; check "Cron 재시도도 실패하면 attempts=2" js_true 'b.embed_attempts===2'
 detail "$EMPTY";     check "한도에 닿은 항목은 Cron 이 다시 시도하지 않음" js_true 'b.embed_attempts===5'
@@ -146,6 +118,8 @@ check "D1 의 모든 벡터가 4,096 bytes BLOB" [ "$BYTES" == 0 ]
 # ── C. 재구축: AI 호출 없이 ───────────────────────────
 echo "C. 재구축 (SQL 한 줄 → Cron)"
 sql "UPDATE bookmarks SET embed_status = 'embedded' WHERE embed_status = 'indexed'" > /dev/null
+# 테스트 안에서만: B 에서 저장한 행도 Cron 대상(60초 경과)이 되게 한다.
+sql "UPDATE bookmarks SET created_at = created_at - 600000" > /dev/null
 start_dev remote
 run_cron
 SUMMARY="$(sed 's/\x1b\[[0-9;]*m//g' "$LOG" | grep processUnfinished | tail -1 | sed 's/^ *//')"
@@ -158,6 +132,4 @@ done
 echo "정리: API 로 북마크 삭제"
 for id in "${CREATED[@]}"; do call DELETE "/api/bookmarks/$id"; done
 
-echo
-echo "결과: PASS $PASS, FAIL $FAIL"
-[[ "$FAIL" -eq 0 ]]
+summary

@@ -41,16 +41,13 @@ export async function handleApi(request: Request, env: Env, ctx: ExecutionContex
     if (method === "GET") return lookupBookmark(env, url.searchParams);
     return error(405, "method not allowed");
   }
-  const idMatch = /^\/api\/bookmarks\/([1-9]\d{0,15})$/.exec(path);
+  // /api/bookmarks/:id 와 /api/bookmarks/:id/similar
+  const idMatch = /^\/api\/bookmarks\/([1-9]\d{0,15})(\/similar)?$/.exec(path);
   if (idMatch) {
     const id = Number(idMatch[1]);
+    if (idMatch[2]) return method === "GET" ? similarBookmarks(env, id, url.searchParams) : error(405, "method not allowed");
     if (method === "GET") return showBookmark(env, id);
     if (method === "DELETE") return removeBookmark(env, id);
-    return error(405, "method not allowed");
-  }
-  const similarMatch = /^\/api\/bookmarks\/([1-9]\d{0,15})\/similar$/.exec(path);
-  if (similarMatch) {
-    if (method === "GET") return similarBookmarks(env, Number(similarMatch[1]), url.searchParams);
     return error(405, "method not allowed");
   }
   return error(404, "not found");
@@ -94,20 +91,10 @@ async function listBookmarks(env: Env, params: URLSearchParams): Promise<Respons
   const q = (params.get("q") ?? "").trim();
   if ([...q].length > MAX_QUERY_CHARS) return error(400, `q must be at most ${MAX_QUERY_CHARS} characters`);
 
-  let from = 0;
-  let to = Number.MAX_SAFE_INTEGER;
-  const fromParam = params.get("from");
-  const toParam = params.get("to");
-  if (fromParam) {
-    const r = kstDayRange(fromParam);
-    if (!r) return error(400, "from must be YYYY-MM-DD");
-    from = r.start;
-  }
-  if (toParam) {
-    const r = kstDayRange(toParam);
-    if (!r) return error(400, "to must be YYYY-MM-DD");
-    to = r.end;
-  }
+  const from = dayBound(params.get("from"), "start", 0);
+  const to = dayBound(params.get("to"), "end", Number.MAX_SAFE_INTEGER);
+  if (from === null) return error(400, "from must be YYYY-MM-DD");
+  if (to === null) return error(400, "to must be YYYY-MM-DD");
   if (from > to) return error(400, "from must not be after to");
 
   const limit = parseIntParam(params.get("limit"), DEFAULT_PAGE, 1, MAX_PAGE);
@@ -218,6 +205,13 @@ export function truncate(s: string, max: number): string {
 
 function toSummary(item: BookmarkListItem) {
   return { ...item, created_at: toKst(item.created_at) };
+}
+
+/** "YYYY-MM-DD" → KST 하루의 시작 또는 끝 (Unix ms). 비어 있으면 fallback, 잘못된 날짜이면 null */
+function dayBound(raw: string | null, edge: "start" | "end", fallback: number): number | null {
+  if (raw === null || raw === "") return fallback;
+  const range = kstDayRange(raw);
+  return range ? range[edge] : null;
 }
 
 /** 비어 있으면 fallback, 범위를 벗어나거나 정수가 아니면 null */
