@@ -22,6 +22,7 @@ npm-debug.log*
 .idea/
 docs/explantion/
 docs/reports/
+AGENTS.md
 
 # macOS
 .DS_Store
